@@ -1,24 +1,29 @@
-FROM alpine
+FROM alpine:3.10
 
 RUN apk update -f \
   && apk --no-cache add -f \
   openssl \
+  coreutils \
+  bind-tools \
   curl \
-  netcat-openbsd
+  socat \
+  tzdata \
+  oath-toolkit-oathtool \
+  tar \
+  && rm -rf /var/cache/apk/*
 
 ENV LE_CONFIG_HOME /acme.sh
 
 ENV AUTO_UPGRADE 1
 
 #Install
-RUN mkdir -p /install_acme.sh/
 ADD ./ /install_acme.sh/
-RUN cd /install_acme.sh && ([ -f /install_acme.sh/acme.sh ] && /install_acme.sh/acme.sh --install || curl https://get.acme.sh | sh)
-RUN rm -rf /install_acme.sh/
+RUN cd /install_acme.sh && ([ -f /install_acme.sh/acme.sh ] && /install_acme.sh/acme.sh --install || curl https://get.acme.sh | sh) && rm -rf /install_acme.sh/
 
-RUN ln -s  /root/.acme.sh/acme.sh  /usr/local/bin/acme.sh
 
-RUN for verb in help \ 
+RUN ln -s  /root/.acme.sh/acme.sh  /usr/local/bin/acme.sh && crontab -l | grep acme.sh | sed 's#> /dev/null##' | crontab -
+
+RUN for verb in help \
   version \
   install \
   uninstall \
@@ -44,9 +49,21 @@ RUN for verb in help \
   create-domain-key \
   createCSR \
   deactivate \
+  deactivate-account \
+  set-notify \
   ; do \
     printf -- "%b" "#!/usr/bin/env sh\n/root/.acme.sh/acme.sh --${verb} --config-home /acme.sh \"\$@\"" >/usr/local/bin/--${verb} && chmod +x /usr/local/bin/--${verb} \
   ; done
 
-ENTRYPOINT ["/root/.acme.sh/acme.sh", "--config-home", "/acme.sh"]
+RUN printf "%b" '#!'"/usr/bin/env sh\n \
+if [ \"\$1\" = \"daemon\" ];  then \n \
+ trap \"echo stop && killall crond && exit 0\" SIGTERM SIGINT \n \
+ crond && while true; do sleep 1; done;\n \
+else \n \
+ exec -- \"\$@\"\n \
+fi" >/entry.sh && chmod +x /entry.sh
+
+VOLUME /acme.sh
+
+ENTRYPOINT ["/entry.sh"]
 CMD ["--help"]
